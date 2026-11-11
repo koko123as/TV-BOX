@@ -1,0 +1,87 @@
+name: cfjs
+
+on:
+  push:
+    branches: [cfjs]
+    paths:
+      - 'cfjs/**'
+      - 'catvod/**'
+      - 'gradle/**'
+      - '.github/workflows/cfjs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARED_VERSION: '2026.10.7'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Upstream loader files are unchanged copies
+        run: |
+          for f in api/loader/JarLoader.java api/loader/SpiderLoader.java exception/SpiderLoadException.java; do
+            diff -u "app/src/main/java/com/fongmi/android/tv/$f" "cfjs/app/src/main/java/com/fongmi/android/tv/$f"
+          done
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Fetch cloudflared source
+        run: git clone --depth 1 --branch "$CLOUDFLARED_VERSION" https://github.com/cloudflare/cloudflared.git "$RUNNER_TEMP/cloudflared"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ runner.temp }}/cloudflared/go.mod
+          cache: false
+
+      - name: Build cloudflared for Android arm64
+        run: |
+          set -x
+          out=cfjs/app/src/main/jniLibs/arm64-v8a
+          mkdir -p "$out" cfjs/app/src/main/assets
+          cc="$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang"
+          cd "$RUNNER_TEMP/cloudflared"
+          if CGO_ENABLED=1 GOOS=android GOARCH=arm64 CC="$cc" go build -trimpath \
+              -ldflags "-s -w -X main.Version=$CLOUDFLARED_VERSION -X main.BuildTime=ci" \
+              -o "$GITHUB_WORKSPACE/$out/libcloudflared.so" ./cmd/cloudflared; then
+            echo "$CLOUDFLARED_VERSION android/arm64 source build (cgo resolver)" > "$GITHUB_WORKSPACE/cfjs/app/src/main/assets/cloudflared.txt"
+          else
+            echo "::warning::android build failed, falling back to the official linux-arm64 release"
+            curl -fsSL -o "$GITHUB_WORKSPACE/$out/libcloudflared.so" "https://github.com/cloudflare/cloudflared/releases/download/$CLOUDFLARED_VERSION/cloudflared-linux-arm64"
+            echo "$CLOUDFLARED_VERSION linux-arm64 release (fallback)" > "$GITHUB_WORKSPACE/cfjs/app/src/main/assets/cloudflared.txt"
+          fi
+          chmod 755 "$GITHUB_WORKSPACE/$out/libcloudflared.so"
+          file "$GITHUB_WORKSPACE/$out/libcloudflared.so"
+          ls -l "$GITHUB_WORKSPACE/$out"
+          cat "$GITHUB_WORKSPACE/cfjs/app/src/main/assets/cloudflared.txt"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Stable debug keystore
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: cfjs-debug-keystore-v1
+
+      - name: Build APK
+        run: ./gradlew -p cfjs :app:assembleDebug --stacktrace
+
+      - name: APK contents
+        run: |
+          apk=$(ls cfjs/app/build/outputs/apk/debug/*.apk)
+          ls -l $apk
+          unzip -l $apk | grep -E "lib/|classes" || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cfjs-debug-apk
+          path: cfjs/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error

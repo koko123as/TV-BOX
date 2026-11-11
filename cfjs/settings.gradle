@@ -1,0 +1,32 @@
+// Standalone build for the CFJS spider service. It reuses the upstream :catvod module and the
+// upstream version catalog, and never configures the upstream :app (which needs unpublished media AARs).
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        mavenCentral()
+        google()
+    }
+}
+
+plugins {
+    id "org.gradle.toolchains.foojay-resolver-convention" version "1.0.0"
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        mavenCentral()
+        google()
+        maven { url = "https://jitpack.io" }
+    }
+    versionCatalogs {
+        libs {
+            from(files("../gradle/libs.versions.toml"))
+        }
+    }
+}
+
+include ':app'
+include ':catvod'
+project(':catvod').projectDir = file('../catvod')
+rootProject.name = "cfjs"

@@ -1,0 +1,6 @@
+# Built in CI from the cloudflared release source; never committed.
+/app/src/main/jniLibs/
+/app/src/main/assets/cloudflared.txt
+/build/
+/app/build/
+/.gradle/
