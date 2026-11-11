@@ -27,7 +27,7 @@ public final class BridgeServer extends NanoHTTPD {
         super(HOST, PORT);
     }
 
-    public static synchronized boolean start() {
+    public static synchronized boolean startServer() {
         if (running()) return true;
         BridgeServer server = new BridgeServer();
         try {

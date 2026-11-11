@@ -57,7 +57,7 @@ public final class TunnelManager {
             BridgeLog.w("cloudflared not packaged: " + bin.getAbsolutePath());
             return;
         }
-        if (!BridgeServer.start()) return;
+        if (!BridgeServer.startServer()) return;
         publicUrl = "";
         Thread thread = new Thread(() -> launch(bin), "cfjs-tunnel");
         thread.setDaemon(true);

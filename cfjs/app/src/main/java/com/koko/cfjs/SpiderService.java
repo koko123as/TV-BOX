@@ -56,7 +56,7 @@ public class SpiderService extends Service {
     }
 
     private void boot() {
-        BridgeServer.start();
+        BridgeServer.startServer();
         String url = Prefs.configUrl();
         if (!Engine.get().loaded() && !url.isEmpty()) {
             try {
