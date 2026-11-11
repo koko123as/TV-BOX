@@ -72,7 +72,7 @@ jobs:
           key: cfjs-debug-keystore-v1
 
       - name: Build APK
-        run: ./gradlew -p cfjs :app:assembleDebug --stacktrace
+        run: bash ./gradlew -p cfjs :app:assembleDebug --stacktrace
 
       - name: APK contents
         run: |
