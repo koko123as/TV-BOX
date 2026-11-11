@@ -15,7 +15,8 @@ import android.os.PowerManager;
 import androidx.annotation.Nullable;
 
 /**
- * Foreground service that keeps the process alive while the HTTP API (and optionally the tunnel) runs,
+ * Foreground service that keeps the process alive while the HTTP API, the Jellyfin server (127.0.0.1:9978)
+ * and optionally the tunnel run,
  * so spiders work with no Activity open. Stopping it stops the tunnel and the API and releases the
  * spider loaders; nothing of upstream is touched.
  */
@@ -57,6 +58,7 @@ public class SpiderService extends Service {
 
     private void boot() {
         BridgeServer.startServer();
+        JellyfinServer.startServer();
         String url = Prefs.configUrl();
         if (!Engine.get().loaded() && !url.isEmpty()) {
             try {
@@ -72,7 +74,7 @@ public class SpiderService extends Service {
         if (Build.VERSION.SDK_INT >= 26) manager.createNotificationChannel(new NotificationChannel(CHANNEL, "Spider 服务", NotificationManager.IMPORTANCE_LOW));
         PendingIntent open = PendingIntent.getActivity(this, 0, new Intent(this, MainActivity.class), PendingIntent.FLAG_IMMUTABLE);
         Notification.Builder builder = Build.VERSION.SDK_INT >= 26 ? new Notification.Builder(this, CHANNEL) : new Notification.Builder(this);
-        Notification notification = builder.setSmallIcon(android.R.drawable.stat_sys_upload_done).setContentTitle("Spider 服务运行中").setContentText("HTTP API 127.0.0.1:" + BridgeServer.PORT).setContentIntent(open).setOngoing(true).build();
+        Notification notification = builder.setSmallIcon(android.R.drawable.stat_sys_upload_done).setContentTitle("Spider 服务运行中").setContentText("API 127.0.0.1:" + BridgeServer.PORT + " · Jellyfin 127.0.0.1:" + JellyfinServer.PORT).setContentIntent(open).setOngoing(true).build();
         if (Build.VERSION.SDK_INT >= 34) startForeground(ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
         else startForeground(ID, notification);
     }
@@ -90,6 +92,7 @@ public class SpiderService extends Service {
         running = false;
         TunnelManager.stop();
         BridgeServer.shutdown();
+        JellyfinServer.shutdown();
         Engine.get().shutdown();
         if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
         wakeLock = null;

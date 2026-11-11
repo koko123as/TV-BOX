@@ -29,6 +29,7 @@ public final class Engine {
     private volatile Map<String, SiteInfo> sites = Collections.emptyMap();
     private volatile List<String> flags = Collections.emptyList();
     private volatile String url = "";
+    private volatile long generation;
 
     public static Engine get() {
         return INSTANCE;
@@ -36,6 +37,11 @@ public final class Engine {
 
     public String url() {
         return url;
+    }
+
+    /** Changes every time a config is applied or released, so caches built on the old sites can be dropped. */
+    public long generation() {
+        return generation;
     }
 
     public boolean loaded() {
@@ -82,6 +88,7 @@ public final class Engine {
         sites = items;
         flags = Json.safeListString(object, "flags");
         url = configUrl;
+        generation++;
         retire(old);
         long java = items.values().stream().filter(SiteInfo::supported).count();
         BridgeLog.i("config loaded sites=" + items.size() + " java=" + java + " in " + (System.currentTimeMillis() - start) + "ms");
@@ -110,7 +117,11 @@ public final class Engine {
         throw new BridgeException("CONFIG_FETCH", "配置下载失败（" + last + "）");
     }
 
+    /** Replaces (not adds to) the global headers, proxy rules and hosts, so a reload does not pile them up. */
     private void applyNetwork(JsonObject object) {
+        OkHttp.responseInterceptor().clear();
+        OkHttp.selector().clear();
+        OkHttp.dns().clear();
         OkHttp.responseInterceptor().addAll(Header.arrayFrom(array(object, "headers")));
         OkHttp.selector().addAll(Proxy.arrayFrom(array(object, "proxy")));
         OkHttp.dns().addAll(Json.safeListString(object, "hosts"));
@@ -138,11 +149,17 @@ public final class Engine {
         return current.getSpider(site.key, site.api, site.ext, site.jar);
     }
 
+    /** CatVod local proxy without siteKey: the recent jar's Proxy.proxy, then the others (upstream BaseLoader.proxy). */
+    public Object[] proxy(Map<String, String> params) throws Exception {
+        return loader.proxy(params);
+    }
+
     /** Releases every spider (upstream VodConfig.destroy path). */
     public synchronized void shutdown() {
         JarLoader old = loader;
         loader = new JarLoader();
         sites = Collections.emptyMap();
+        generation++;
         retire(old);
     }
 }

@@ -17,7 +17,7 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
-/** Management page: config, service, tunnel, self-test, status and log. Plain views, no upstream UI. */
+/** Management page: config, service, Jellyfin home site, tunnel, self-test, status and log. Plain views, no upstream UI. */
 public class MainActivity extends Activity {
 
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -42,6 +42,10 @@ public class MainActivity extends Activity {
         status = new TextView(this);
         status.setTextIsSelectable(true);
         root.addView(status);
+        TextView hint = new TextView(this);
+        hint.setText("SenPlayer: 127.0.0.1 端口 9978（添加 Jellyfin 服务器，用户名任意，密码留空）");
+        hint.setTextIsSelectable(true);
+        root.addView(hint);
         config = new EditText(this);
         config.setHint("点播配置地址（单仓 JSON）");
         config.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
@@ -49,8 +53,9 @@ public class MainActivity extends Activity {
         config.setText(Prefs.configUrl());
         root.addView(config);
         root.addView(button("保存并加载配置", this::loadConfig));
-        root.addView(button("启动服务（HTTP API）", () -> SpiderService.start(this)));
+        root.addView(button("启动服务（HTTP API + Jellyfin）", () -> SpiderService.start(this)));
         root.addView(button("停止服务（释放全部资源）", () -> SpiderService.stop(this)));
+        root.addView(button("选择 Jellyfin 首页站点", this::chooseHome));
         root.addView(button("启动 Quick Tunnel", () -> {
             if (!SpiderService.isRunning()) SpiderService.start(this);
             TunnelManager.start();
@@ -107,6 +112,29 @@ public class MainActivity extends Activity {
         }, "cfjs-config").start();
     }
 
+    /** The site whose 推荐 and categories SenPlayer shows as libraries (like 影视仓's 首页数据源). */
+    private void chooseHome() {
+        java.util.List<SiteInfo> list = new java.util.ArrayList<>();
+        for (SiteInfo site : Engine.get().sites()) if (site.supported()) list.add(site);
+        if (list.isEmpty()) {
+            toast("请先加载配置");
+            return;
+        }
+        String current = JellyfinApi.homeKey();
+        String[] names = new String[list.size()];
+        int checked = -1;
+        for (int i = 0; i < list.size(); i++) {
+            names[i] = list.get(i).name.isEmpty() ? list.get(i).key : list.get(i).name;
+            if (list.get(i).key.equals(current)) checked = i;
+        }
+        new android.app.AlertDialog.Builder(this).setTitle("Jellyfin 首页站点").setSingleChoiceItems(names, checked, (dialog, which) -> {
+            Prefs.jellyfinHome(list.get(which).key);
+            BridgeLog.i("[JF] 首页站点切换为 " + list.get(which).key + "（SenPlayer 里刷新媒体库即可看到）");
+            dialog.dismiss();
+            render();
+        }).setNegativeButton("取消", null).show();
+    }
+
     private void copy() {
         String url = TunnelManager.publicUrl();
         ClipboardManager manager = getSystemService(ClipboardManager.class);
@@ -124,6 +152,7 @@ public class MainActivity extends Activity {
         long java = Engine.get().sites().stream().filter(SiteInfo::supported).count();
         status.setText("服务：" + (SpiderService.isRunning() ? "运行中" : "已停止")
                 + "\nHTTP API：" + (BridgeServer.running() ? "http://" + BridgeServer.HOST + ":" + BridgeServer.PORT : "已停止")
+                + "\nJellyfin：" + (JellyfinServer.running() ? JellyfinServer.BASE + (Engine.get().loaded() ? "，首页站点 " + JellyfinApi.shortName(JellyfinApi.homeKey()) : "") : "已停止")
                 + "\n配置：" + (Engine.get().loaded() ? sites + " 个站点，Java " + java : "未加载")
                 + "\nTunnel：" + (TunnelManager.running() ? (url.isEmpty() ? "连接中…" : url) : "已停止")
                 + "\ncloudflared：" + (TunnelManager.binary().exists() ? TunnelManager.buildInfo() : "未打包")

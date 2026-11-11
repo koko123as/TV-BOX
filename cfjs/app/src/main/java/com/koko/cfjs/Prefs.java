@@ -26,6 +26,15 @@ public final class Prefs {
         prefs().edit().putString("config_url", url == null ? "" : url.trim()).apply();
     }
 
+    /** Site key whose 推荐 and categories are the Jellyfin libraries; empty = first Java site of the config. */
+    public static String jellyfinHome() {
+        return prefs().getString("jf_home", "");
+    }
+
+    public static void jellyfinHome(String key) {
+        prefs().edit().putString("jf_home", key == null ? "" : key).apply();
+    }
+
     public static synchronized String token() {
         String token = prefs().getString("token", "");
         if (token.isEmpty()) {

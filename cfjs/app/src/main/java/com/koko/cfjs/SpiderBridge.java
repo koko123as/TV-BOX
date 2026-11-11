@@ -28,23 +28,33 @@ import java.util.concurrent.atomic.AtomicInteger;
  * Calls Java spiders the way upstream SiteApi does for type 3 sites, without any Activity:
  * home = homeContent(true) + homeVideoContent; category/search/detail/player pass straight through;
  * player result keeps the spider's own fields, sets flag when empty and site headers when the spider gave none.
- * One running task per site; a timed-out task keeps the permit until it really ends.
+ * One running task per site (three for the Jellyfin instance); a timed-out task keeps the permit until it really ends.
  */
 public final class SpiderBridge {
 
     public static final long TIMEOUT_MS = TimeUnit.SECONDS.toMillis(30);
-    private static final SpiderBridge INSTANCE = new SpiderBridge();
+    private static final SpiderBridge INSTANCE = new SpiderBridge(1, "cfjs-spider-");
+    /** Separate instance for the Jellyfin server: SenPlayer opens several rows of one site at once. */
+    private static final SpiderBridge JELLYFIN = new SpiderBridge(3, "cfjs-jf-");
     private final ConcurrentHashMap<String, Semaphore> permits = new ConcurrentHashMap<>();
     private final ExecutorService executor;
+    private final int perSite;
 
+    /** Instance used by the token API on 19978: one running task per site. */
     public static SpiderBridge get() {
         return INSTANCE;
     }
 
-    private SpiderBridge() {
+    /** Instance used by the Jellyfin server on 9978: up to 3 running tasks per site. */
+    public static SpiderBridge jellyfin() {
+        return JELLYFIN;
+    }
+
+    private SpiderBridge(int perSite, String prefix) {
+        this.perSite = perSite;
         AtomicInteger count = new AtomicInteger();
         executor = Executors.newCachedThreadPool(runnable -> {
-            Thread thread = new Thread(runnable, "cfjs-spider-" + count.incrementAndGet());
+            Thread thread = new Thread(runnable, prefix + count.incrementAndGet());
             thread.setDaemon(true);
             return thread;
         });
@@ -69,9 +79,35 @@ public final class SpiderBridge {
         return site;
     }
 
+    /** True while any call of this instance is running on the site. */
+    public boolean busy(String key) {
+        Semaphore permit = key == null ? null : permits.get(key);
+        return permit != null && permit.availablePermits() < perSite;
+    }
+
     public Timed home(String key) throws BridgeException {
+        return home(key, TIMEOUT_MS);
+    }
+
+    public Timed category(String key, String tid, int page, Map<String, String> filters) throws BridgeException {
+        return category(key, tid, page, filters, TIMEOUT_MS);
+    }
+
+    public Timed search(String key, String keyword, int page) throws BridgeException {
+        return search(key, keyword, page, TIMEOUT_MS);
+    }
+
+    public Timed detail(String key, String id) throws BridgeException {
+        return detail(key, id, TIMEOUT_MS);
+    }
+
+    public Timed play(String key, String flag, String id) throws BridgeException {
+        return play(key, flag, id, TIMEOUT_MS);
+    }
+
+    public Timed home(String key, long timeoutMs) throws BridgeException {
         SiteInfo site = requireSite(key);
-        return run(site, "home", () -> {
+        return run(site, "home", timeoutMs, () -> {
             Spider spider = Engine.get().spider(site);
             JsonObject home = object(spider.homeContent(true));
             JsonObject video = object(spider.homeVideoContent());
@@ -82,31 +118,31 @@ public final class SpiderBridge {
         });
     }
 
-    public Timed category(String key, String tid, int page, Map<String, String> filters) throws BridgeException {
+    public Timed category(String key, String tid, int page, Map<String, String> filters, long timeoutMs) throws BridgeException {
         SiteInfo site = requireSite(key);
         if (tid == null || tid.isEmpty()) throw new BridgeException("BAD_REQUEST", "tid is required");
         HashMap<String, String> extend = filters == null ? new HashMap<>() : new HashMap<>(filters);
         String pg = String.valueOf(Math.max(page, 1));
         // Upstream TypeFragment (mobile and leanback) always calls categoryContent with filter=true.
-        return run(site, "category", () -> object(Engine.get().spider(site).categoryContent(tid, pg, true, extend)));
+        return run(site, "category", timeoutMs, () -> object(Engine.get().spider(site).categoryContent(tid, pg, true, extend)));
     }
 
-    public Timed search(String key, String keyword, int page) throws BridgeException {
+    public Timed search(String key, String keyword, int page, long timeoutMs) throws BridgeException {
         SiteInfo site = requireSite(key);
         if (!site.searchable) throw new BridgeException("UNSUPPORTED_SITE", "站点不可搜索: " + key);
         if (keyword == null || keyword.trim().isEmpty()) throw new BridgeException("BAD_REQUEST", "wd is required");
         String pg = String.valueOf(Math.max(page, 1));
         // Upstream uses the two-argument searchContent on page 1 and the paged overload after it.
-        return run(site, "search", () -> {
+        return run(site, "search", timeoutMs, () -> {
             Spider spider = Engine.get().spider(site);
             return object("1".equals(pg) ? spider.searchContent(keyword, false) : spider.searchContent(keyword, false, pg));
         });
     }
 
-    public Timed detail(String key, String id) throws BridgeException {
+    public Timed detail(String key, String id, long timeoutMs) throws BridgeException {
         SiteInfo site = requireSite(key);
         if (id == null || id.isEmpty()) throw new BridgeException("BAD_REQUEST", "id is required");
-        return run(site, "detail", () -> {
+        return run(site, "detail", timeoutMs, () -> {
             JsonObject result = object(Engine.get().spider(site).detailContent(Collections.singletonList(id)));
             JsonArray list = array(result, "list");
             if (list.size() > 0 && list.get(0).isJsonObject()) list.get(0).getAsJsonObject().add("cfjs_flags", Episodes.flags(list.get(0).getAsJsonObject()));
@@ -114,10 +150,10 @@ public final class SpiderBridge {
         });
     }
 
-    public Timed play(String key, String flag, String id) throws BridgeException {
+    public Timed play(String key, String flag, String id, long timeoutMs) throws BridgeException {
         SiteInfo site = requireSite(key);
         if (flag == null || id == null || id.isEmpty()) throw new BridgeException("BAD_REQUEST", "flag and id are required");
-        return run(site, "play", () -> PlayInfo.from(object(Engine.get().spider(site).playerContent(flag, id, Engine.get().flags())), flag, site));
+        return run(site, "play", timeoutMs, () -> PlayInfo.from(object(Engine.get().spider(site).playerContent(flag, id, Engine.get().flags())), flag, site));
     }
 
     private static void filterCategories(SiteInfo site, JsonObject home) {
@@ -151,11 +187,11 @@ public final class SpiderBridge {
         if (!started.getAndSet(true)) permit.release();
     }
 
-    private Timed run(SiteInfo site, String op, Callable<JsonObject> callable) throws BridgeException {
-        Semaphore permit = permits.computeIfAbsent(site.key, key -> new Semaphore(1));
+    private Timed run(SiteInfo site, String op, long timeoutMs, Callable<JsonObject> callable) throws BridgeException {
+        Semaphore permit = permits.computeIfAbsent(site.key, key -> new Semaphore(perSite));
         long start = SystemClock.elapsedRealtime();
         try {
-            if (!permit.tryAcquire(TIMEOUT_MS, TimeUnit.MILLISECONDS)) throw new BridgeException("BUSY", "站点忙: " + site.key);
+            if (!permit.tryAcquire(timeoutMs, TimeUnit.MILLISECONDS)) throw new BridgeException("BUSY", "站点忙: " + site.key);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new BridgeException("CANCELLED", "interrupted", e);
@@ -175,7 +211,7 @@ public final class SpiderBridge {
             permit.release();
             throw new BridgeException("SPIDER_ERROR", "cannot schedule " + op, e);
         }
-        long remaining = Math.max(1, TIMEOUT_MS - (SystemClock.elapsedRealtime() - start));
+        long remaining = Math.max(1, timeoutMs - (SystemClock.elapsedRealtime() - start));
         try {
             JsonObject value = future.get(remaining, TimeUnit.MILLISECONDS);
             long elapsed = SystemClock.elapsedRealtime() - start;
@@ -184,7 +220,7 @@ public final class SpiderBridge {
         } catch (TimeoutException e) {
             cancel(future, started, permit);
             BridgeLog.w(op + " site=" + site.key + " TIMEOUT");
-            throw new BridgeException("TIMEOUT", op + " 超过 " + TIMEOUT_MS + "ms", e);
+            throw new BridgeException("TIMEOUT", op + " 超过 " + timeoutMs + "ms", e);
         } catch (InterruptedException e) {
             cancel(future, started, permit);
             Thread.currentThread().interrupt();
