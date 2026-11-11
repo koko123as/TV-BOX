@@ -5,6 +5,7 @@ import com.github.catvod.bean.Header;
 import com.github.catvod.bean.Proxy;
 import com.github.catvod.crawler.Spider;
 import com.github.catvod.net.OkHttp;
+import com.fongmi.android.tv.App;
 import com.github.catvod.utils.Crypto;
 import com.github.catvod.utils.Json;
 import com.google.gson.JsonArray;
@@ -63,7 +64,15 @@ public final class Engine {
     /** Downloads and applies the config. Must not run on the main thread. */
     public synchronized void load(String configUrl) throws Exception {
         long start = System.currentTimeMillis();
-        String text = fetch(configUrl);
+        String text;
+        java.io.File cache = new java.io.File(App.get().getFilesDir(), "config-" + Crypto.md5(configUrl) + ".json");
+        try {
+            text = fetch(configUrl);
+        } catch (BridgeException e) {
+            if (!cache.isFile()) throw e;
+            text = new String(java.nio.file.Files.readAllBytes(cache.toPath()), java.nio.charset.StandardCharsets.UTF_8);
+            BridgeLog.w("config fetch failed, using last good copy (" + cache.length() + " bytes): " + e.getMessage());
+        }
         JsonElement parsed = Json.parse(text);
         if (parsed == null || !parsed.isJsonObject()) throw new BridgeException("CONFIG_INVALID", "配置不是 JSON 对象（可能是加密配置，v1 不支持）");
         JsonObject object = parsed.getAsJsonObject();
@@ -76,6 +85,11 @@ public final class Engine {
             if (site != null && !items.containsKey(site.key)) items.put(site.key, site);
         }
         if (items.isEmpty()) throw new BridgeException("CONFIG_EMPTY", "配置里没有 sites");
+        try {
+            java.nio.file.Files.write(cache.toPath(), text.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        } catch (Exception e) {
+            BridgeLog.w("config cache write failed: " + e);
+        }
         JarLoader fresh = new JarLoader();
         if (!spider.isEmpty()) {
             String key = Crypto.md5(spider);

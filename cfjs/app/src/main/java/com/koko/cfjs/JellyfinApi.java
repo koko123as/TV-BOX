@@ -304,6 +304,13 @@ final class JellyfinApi {
         }
     }
 
+    /** SenPlayer asks for this on the home screen; zero counts are what an empty Jellyfin library reports. */
+    private static JsonObject itemCounts() {
+        O o = new O();
+        for (String k : new String[]{"MovieCount", "SeriesCount", "EpisodeCount", "ArtistCount", "ProgramCount", "TrailerCount", "SongCount", "AlbumCount", "MusicVideoCount", "BoxSetCount", "BookCount", "ItemCount"}) o.p(k, 0);
+        return o.o;
+    }
+
     // ---------- sites ----------
 
     /** Every Java site of the loaded config (cfjs v1 serves Java sites only), config order. */
@@ -412,6 +419,7 @@ final class JellyfinApi {
         if (is(low, 0, "users") && is(low, 2, "items") && n == 4) return item(seg.get(3));
         if (is(low, 0, "users") && is(low, 2, "items") && n == 3) return json(items(q));
         if (is(low, 0, "items") && n == 1) return json(items(q));
+        if (is(low, 0, "items") && is(low, 1, "counts")) return json(itemCounts());
         if (is(low, 0, "items") && n == 2 && low.get(1).length() == 32) return item(seg.get(1));
         if (is(low, 0, "items") && is(low, 2, "playbackinfo")) return json(playbackInfo(seg.get(1)));
         if (is(low, 0, "items") && is(low, 2, "images")) return image(seg.get(1));
