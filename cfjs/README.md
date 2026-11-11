@@ -86,3 +86,20 @@ cloudflared 由 CI 从官方源码以 `GOOS=android` 编译，放到 `jniLibs/ar
 - SpiderHost 自己的 jar 加载方式。
 
 封面补全改为全局只用 1 个后台线程。
+
+## 网盘（0.3.0）
+
+网盘站（夸克、UC、阿里、115、百度、天翼、123、迅雷、移动等）在 FongMi 里依赖下面几样宿主能力，本模块按上游补齐：
+
+- **存储**：catvod `Path.root()` 是外部存储根目录，`Path.tv()` 是 `/sdcard/TV`。上游申请 `MANAGE_EXTERNAL_STORAGE`（`app/src/main/AndroidManifest.xml`、`PermissionUtil.requestFile`），这里同样声明，并在「网盘登录」页提供授权入口。
+- **登录界面**：Spider 通过 `Runtime.activity()`（前台 Activity）弹自己的二维码/输入框，或调用 `Runtime.dialog`（上游 `SpiderDialog`）。本模块用 `CfjsDialog` 实现同一套选项（title、message、qrcode、image、inputs、buttons、回调补丁）。登录弹窗只在 Spider 服务界面处于前台时可用，所以登录要在「网盘登录」页里操作。
+- **action 条目**：带 `action` 字段的条目（配置中心、扫码入口）调用 `spider.action`（上游 `TypeFragment` → `SiteApi.action`），返回的 `msg` 会提示，`web` 会用内置网页打开。
+- **Cookie**：`spider.net` 的 Cookie 存在系统 `CookieManager`（与上游 `WebViewCookies` 相同），重启后仍在。
+- **本地代理**：`127.0.0.1:9978/proxy` 按上游 `server/process/Proxy` 转发给 `spider.proxy` 或 jar 的静态 `Proxy.proxy`，原样回传状态码、全部响应头和 Content-Length，流式输出，不缓存。`proxy://` 地址和 `http://<任意主机>:9978/proxy` 地址都按本地代理处理，Jellyfin 播放时直接在进程内处理 SenPlayer 的 Range 请求。
+- **/file/**：只读提供外部存储下的文件（上游 `/file/`），供 `http://127.0.0.1:9978/file/TVBox/xxx.txt` 这类 ext 使用。
+
+日志前缀：`[NETDISK]`（存储、登录页、播放线路、自检）、`[PROXY]`（每个代理请求的状态、类型、长度、Content-Range、实际发出的字节数）、`[TOAST]`（Spider 的提示）。日志里只写请求头的名字，不写 Cookie 的值。
+
+「网盘自检」在玩偶站上依次跑首页、详情和每条网盘线路的 playerContent，再像 SenPlayer 一样读取前 64 KB，结果写到「下载/cfjs-netdisk-*.txt」。
+
+限制：不解密 Guard。Guard jar 自带的登录逻辑看不到源码，只能从设备日志判断它走的是哪条路；需要网页嗅探（parse=1）的线路仍不支持。

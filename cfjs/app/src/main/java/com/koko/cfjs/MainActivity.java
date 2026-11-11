@@ -56,6 +56,7 @@ public class MainActivity extends Activity {
         root.addView(button("启动服务（HTTP API + Jellyfin）", () -> SpiderService.start(this)));
         root.addView(button("停止服务（释放全部资源）", () -> SpiderService.stop(this)));
         root.addView(button("选择 Jellyfin 首页站点", this::chooseHome));
+        root.addView(button("网盘登录 / 站点浏览（扫码、Cookie、网盘自检）", () -> startActivity(new android.content.Intent(this, DriveActivity.class))));
         root.addView(button("启动 Quick Tunnel", () -> {
             if (!SpiderService.isRunning()) SpiderService.start(this);
             TunnelManager.start();
@@ -156,7 +157,8 @@ public class MainActivity extends Activity {
                 + "\n配置：" + (Engine.get().loaded() ? sites + " 个站点，Java " + java : "未加载")
                 + "\nTunnel：" + (TunnelManager.running() ? (url.isEmpty() ? "连接中…" : url) : "已停止")
                 + "\ncloudflared：" + (TunnelManager.binary().exists() ? TunnelManager.buildInfo() : "未打包")
-                + "\n自检：" + (SelfTest.running() ? "运行中" : "空闲"));
+                + "\n自检：" + (SelfTest.running() ? "运行中" : "空闲") + (DriveTest.running() ? "，网盘自检运行中" : "")
+                + "\n" + NetDisk.storageStatus());
         log.setText(BridgeLog.dump());
     }
 

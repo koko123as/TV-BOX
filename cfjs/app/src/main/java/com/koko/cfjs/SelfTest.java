@@ -64,7 +64,7 @@ public final class SelfTest {
             line("ABORT " + e);
         }
         line("failures=" + failures);
-        line("saved=" + save());
+        line("saved=" + save("cfjs-selftest-", report.toString()));
     }
 
     private void body() throws Exception {
@@ -167,6 +167,8 @@ public final class SelfTest {
                     if (play != null) {
                         JsonObject summary = play.deepCopy();
                         summary.remove("raw");
+                        JsonElement header = summary.remove("header");
+                        summary.add("headerKeys", headerKeys(header));
                         line("     " + summary);
                         played = !Json.safeString(play, "url").isEmpty();
                     }
@@ -183,6 +185,13 @@ public final class SelfTest {
         }
         line("activityResumed(end)=" + (App.activity() != null) + " chain=" + (played ? "OK" : "incomplete"));
         return played;
+    }
+
+    /** Header names only: Cookie/Authorization values never go into a report. */
+    static JsonArray headerKeys(JsonElement header) {
+        JsonArray keys = new JsonArray();
+        if (header != null && header.isJsonObject()) for (String key : header.getAsJsonObject().keySet()) keys.add(key);
+        return keys;
     }
 
     private static JsonObject firstVod(JsonArray list) {
@@ -228,9 +237,10 @@ public final class SelfTest {
         BridgeLog.i(text);
     }
 
-    private String save() {
-        String name = "cfjs-selftest-" + new SimpleDateFormat("yyyyMMdd-HHmmss", Locale.ROOT).format(new Date()) + ".txt";
-        byte[] bytes = report.toString().getBytes(StandardCharsets.UTF_8);
+    /** Writes a report to the public Download folder (MediaStore on Android 10+). */
+    static String save(String prefix, String text) {
+        String name = prefix + new SimpleDateFormat("yyyyMMdd-HHmmss", Locale.ROOT).format(new Date()) + ".txt";
+        byte[] bytes = text.getBytes(StandardCharsets.UTF_8);
         try {
             if (Build.VERSION.SDK_INT >= 29) {
                 ContentResolver resolver = App.get().getContentResolver();

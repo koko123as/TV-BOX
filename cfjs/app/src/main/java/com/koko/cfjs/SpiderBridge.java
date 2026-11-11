@@ -156,6 +156,13 @@ public final class SpiderBridge {
         return run(site, "play", timeoutMs, () -> PlayInfo.from(object(Engine.get().spider(site).playerContent(flag, id, Engine.get().flags())), flag, site));
     }
 
+    /** Upstream SiteApi.action: items carrying an "action" field (config / drive-login entries) call spider.action. */
+    public Timed action(String key, String action, long timeoutMs) throws BridgeException {
+        SiteInfo site = requireSite(key);
+        if (action == null || action.isEmpty()) throw new BridgeException("BAD_REQUEST", "action is required");
+        return run(site, "action", timeoutMs, () -> object(Engine.get().spider(site).action(action)));
+    }
+
     private static void filterCategories(SiteInfo site, JsonObject home) {
         if (site.categories.isEmpty()) return;
         JsonArray types = array(home, "class");

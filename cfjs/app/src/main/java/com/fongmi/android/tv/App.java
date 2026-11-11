@@ -16,6 +16,8 @@ import com.github.catvod.Runtime;
  * CFJS shim with the same name as upstream {@code com.fongmi.android.tv.App}, so the upstream loader files
  * copied by scripts/sync-upstream.sh compile unchanged. Only {@link #get()} is used by them. Spider JARs
  * (Guard included) receive this Application through {@code Init.init(Context)}.
+ * Like upstream App, {@link #activity()} is the resumed Activity (null while SenPlayer is in front): drive
+ * spiders show their login/QR dialogs on it, so logins are done from the 网盘登录 page of this app.
  */
 public class App extends Application implements Application.ActivityLifecycleCallbacks {
 
@@ -45,7 +47,12 @@ public class App extends Application implements Application.ActivityLifecycleCal
         handler = new Handler(Looper.getMainLooper());
         Runtime.set(this);
         Runtime.setActivity(App::activity);
-        Runtime.setToast(text -> post(() -> Toast.makeText(this, text, Toast.LENGTH_SHORT).show()));
+        Runtime.setToast(text -> {
+            com.koko.cfjs.BridgeLog.i("[TOAST] " + text);
+            post(() -> Toast.makeText(this, text, Toast.LENGTH_SHORT).show());
+        });
+        // Spider.dialog / Runtime.dialog (QR and cookie login forms of drive spiders), upstream SpiderDialog.
+        Runtime.setDialog(com.koko.cfjs.CfjsDialog::show);
         registerActivityLifecycleCallbacks(this);
     }
 

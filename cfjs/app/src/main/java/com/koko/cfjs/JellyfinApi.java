@@ -77,7 +77,7 @@ final class JellyfinApi {
     private static final long CATEGORY_MS = 15_000;
     private static final long SEARCH_MS = 12_000;
     private static final long DETAIL_MS = 12_000;
-    private static final long PLAY_MS = 30_000;
+    private static final long PLAY_MS = 45_000;
     private static final int MAX_GROUP = 16;
     private static final long DETAIL_FAIL_TTL = 60_000L;
     private static final String MSEARCH = "msearch:";
@@ -1143,7 +1143,9 @@ final class JellyfinApi {
         String container = q != null ? containerOf(q[1]) : "mp4";
         String msId = index == 0 ? itemId : qualityId(itemId, index);
         String name = q != null && !q[0].trim().isEmpty() ? q[0] : "Spider";
-        return new O().p("Protocol", "Http").p("Id", msId).p("Path", JellyfinServer.BASE + "/Videos/" + itemId + "/stream?static=true&MediaSourceId=" + msId)
+        // A spider proxy URL (already on 127.0.0.1:9978/proxy) is handed to SenPlayer as is.
+        String path = q != null && LocalProxy.isProxyUrl(q[1]) ? q[1] : JellyfinServer.BASE + "/Videos/" + itemId + "/stream?static=true&MediaSourceId=" + msId;
+        return new O().p("Protocol", "Http").p("Id", msId).p("Path", path)
                 .p("Type", "Default").p("Container", container).p("Name", name).p("IsRemote", true).p("ReadAtNativeFramerate", false)
                 .p("IgnoreDts", false).p("IgnoreIndex", false).p("GenPtsInput", false).p("SupportsTranscoding", false)
                 .p("SupportsDirectStream", true).p("SupportsDirectPlay", true).p("IsInfiniteStream", false).p("RequiresOpening", false)
@@ -1202,7 +1204,7 @@ final class JellyfinApi {
             BridgeLog.w("[JF] playerContent " + site + " " + flag + " " + ex.code + ": " + ex.getMessage());
             return null;
         }
-        BridgeLog.i("[JF] playerContent url=" + cut(str(p, "url"), 300) + " parse=" + intOf(p, "parse") + " jx=" + intOf(p, "jx") + " header=" + p.get("header"));
+        BridgeLog.i("[JF] playerContent url=" + cut(str(p, "url"), 300) + " parse=" + intOf(p, "parse") + " jx=" + intOf(p, "jx") + " header=" + (p.get("header") != null && p.get("header").isJsonObject() ? p.get("header").getAsJsonObject().keySet() : "{}"));
         if (intOf(p, "parse") == 1 || intOf(p, "jx") == 1) {
             BridgeLog.w("[JF] 不兼容：parse/jx=1（需要网页嗅探/解析，v1 不支持）");
             return null;
@@ -1214,8 +1216,12 @@ final class JellyfinApi {
         List<String[]> qualities = qualitiesOf(p);
         if (qualities.isEmpty()) {
             BridgeLog.w("[JF] 无可用 http 地址: " + cut(String.valueOf(p.get("urls")), 200));
+            String driveName = NetDisk.driveOf(flag);
+            if (!driveName.isEmpty()) NetDisk.w(driveName + " 线路 " + flag + " playerContent 没给地址（多半是没登录/Cookie 失效）raw=" + cut(String.valueOf(withoutHeader(p.get("raw"))), 400));
             return null;
         }
+        String drive = NetDisk.driveOf(flag);
+        if (!drive.isEmpty()) NetDisk.i(drive + " 线路 " + flag + " -> " + (LocalProxy.isProxyUrl(qualities.get(0)[1]) ? "本地代理 " : "直链 ") + cut(qualities.get(0)[1], 200) + " header=" + (p.get("header") == null ? "{}" : p.get("header").getAsJsonObject().keySet()));
         Map<String, String> headers = new LinkedHashMap<>();
         JsonElement h = p.get("header");
         if (h != null && h.isJsonObject()) for (Map.Entry<String, JsonElement> entry : h.getAsJsonObject().entrySet()) {
@@ -1258,6 +1264,14 @@ final class JellyfinApi {
         return out;
     }
 
+    /** Spider result without its header (Cookie/Authorization must never reach the log). */
+    static JsonElement withoutHeader(JsonElement raw) {
+        if (raw == null || !raw.isJsonObject()) return raw;
+        JsonObject copy = raw.getAsJsonObject().deepCopy();
+        copy.remove("header");
+        return copy;
+    }
+
     private static final Pattern PROXY_HOST = Pattern.compile("^http://[^/:]+:" + JellyfinServer.PORT + "/proxy");
 
     /** proxy:// and the phone's own LAN address both mean this server's /proxy, reached on 127.0.0.1. */
@@ -1282,6 +1296,11 @@ final class JellyfinApi {
         Resolved r = resolve(itemId);
         if (r == null) return text(Response.Status.NOT_FOUND, "no playable url");
         String url = (qi < r.qualities.size() ? r.qualities.get(qi) : r.qualities.get(0))[1];
+        if (LocalProxy.isProxyUrl(url)) {
+            // Spider local proxy (drive multi-thread download etc.): served right here with SenPlayer's Range,
+            // never as a redirect to an "external" address.
+            return LocalProxy.serveUrl(s, url, "[JF] stream " + itemId + " q" + qi);
+        }
         boolean local = url.startsWith(JellyfinServer.BASE + "/");
         if (r.headers.isEmpty() || local) {
             BridgeLog.i("[JF] stream " + itemId + " q" + qi + " -> 302 " + cut(url, 200));
