@@ -57,8 +57,7 @@ public final class Engine {
     /** Downloads and applies the config. Must not run on the main thread. */
     public synchronized void load(String configUrl) throws Exception {
         long start = System.currentTimeMillis();
-        String text = OkHttp.string(configUrl);
-        if (text == null || text.trim().isEmpty()) throw new BridgeException("CONFIG_EMPTY", "配置下载失败或为空：" + configUrl);
+        String text = fetch(configUrl);
         JsonElement parsed = Json.parse(text);
         if (parsed == null || !parsed.isJsonObject()) throw new BridgeException("CONFIG_INVALID", "配置不是 JSON 对象（可能是加密配置，v1 不支持）");
         JsonObject object = parsed.getAsJsonObject();
@@ -86,6 +85,29 @@ public final class Engine {
         retire(old);
         long java = items.values().stream().filter(SiteInfo::supported).count();
         BridgeLog.i("config loaded sites=" + items.size() + " java=" + java + " in " + (System.currentTimeMillis() - start) + "ms");
+    }
+
+    /** Up to 3 tries, keeping the real network error (OkHttp.string swallows it). */
+    private static String fetch(String configUrl) throws BridgeException {
+        if (!configUrl.startsWith("http")) throw new BridgeException("CONFIG_INVALID", "配置地址要以 http 开头");
+        String last = "";
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            try (okhttp3.Response response = OkHttp.newCall(configUrl).execute()) {
+                String body = response.body().string();
+                if (response.isSuccessful() && !body.trim().isEmpty()) return body;
+                last = "HTTP " + response.code() + " 长度 " + body.length();
+            } catch (Exception e) {
+                last = e.getClass().getSimpleName() + ": " + e.getMessage();
+            }
+            BridgeLog.w("config fetch " + attempt + "/3 failed: " + last);
+            try {
+                Thread.sleep(1000L * attempt);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        throw new BridgeException("CONFIG_FETCH", "配置下载失败（" + last + "）");
     }
 
     private void applyNetwork(JsonObject object) {

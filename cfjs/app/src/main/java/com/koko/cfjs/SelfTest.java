@@ -32,7 +32,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public final class SelfTest {
 
-    private static final int SCAN = 8;
+    private static final int SCAN = 10;
+    private static final int DEEP = 5;
     private static final AtomicBoolean RUNNING = new AtomicBoolean();
     private final StringBuilder report = new StringBuilder();
     private int failures;
@@ -80,9 +81,8 @@ public final class SelfTest {
         }
         line("sites java=" + java.size() + " other=" + other);
         line("== part 1: homeContent on the first " + Math.min(SCAN, java.size()) + " Java sites (activityResumed=" + (App.activity() != null) + ")");
-        SiteInfo picked = null;
-        JsonObject pickedHome = null;
-        int ok = 0;
+        List<SiteInfo> passed = new ArrayList<>();
+        List<JsonObject> homes = new ArrayList<>();
         for (SiteInfo site : java.subList(0, Math.min(SCAN, java.size()))) {
             JsonObject home = step("home " + site.key + " (" + site.api + ")", () -> SpiderBridge.get().home(site.key));
             if (home == null) continue;
@@ -90,24 +90,38 @@ public final class SelfTest {
             int list = SpiderBridge.array(home, "list").size();
             line("     class=" + classes + " list=" + list);
             if (classes > 0 || list > 0) {
-                ok++;
-                if (picked == null) {
-                    picked = site;
-                    pickedHome = home;
-                }
+                passed.add(site);
+                homes.add(home);
             }
         }
-        line("part 1 result: " + ok + "/" + Math.min(SCAN, java.size()) + " returned content");
-        if (picked == null) {
+        line("part 1 result: " + passed.size() + "/" + Math.min(SCAN, java.size()) + " returned content");
+        if (passed.isEmpty()) {
             failures++;
             line("FAIL no site returned home content; part 2 skipped");
             return;
         }
-        deep(picked, pickedHome);
+        // Part 2 walks the passing sites until one completes category -> detail -> play. Douban-style sites
+        // return msearch: ids (upstream turns them into a cross-site search), so they cannot finish the chain.
+        int before = failures;
+        int tried = 0;
+        for (int i = 0; i < passed.size() && tried < DEEP; i++) {
+            JsonArray list = SpiderBridge.array(homes.get(i), "list");
+            if (list.size() > 0 && firstVod(list) == null) {
+                line("skip " + passed.get(i).key + ": home only has msearch: ids (search redirect site)");
+                continue;
+            }
+            tried++;
+            failures = before;
+            if (deep(passed.get(i), homes.get(i))) return;
+        }
+        failures = before + 1;
+        line("FAIL no site finished category -> detail -> play");
     }
 
-    private void deep(SiteInfo site, JsonObject home) throws Exception {
+    /** True when play returned a URL. */
+    private boolean deep(SiteInfo site, JsonObject home) {
         line("== part 2: " + site.key + " " + site.name + " (activityResumed=" + (App.activity() != null) + ")");
+        boolean played = false;
         String vodId = firstId(SpiderBridge.array(home, "list"));
         String vodName = firstName(SpiderBridge.array(home, "list"));
         JsonArray types = SpiderBridge.array(home, "class");
@@ -154,6 +168,7 @@ public final class SelfTest {
                         JsonObject summary = play.deepCopy();
                         summary.remove("raw");
                         line("     " + summary);
+                        played = !Json.safeString(play, "url").isEmpty();
                     }
                 }
             } else if (detail != null) {
@@ -166,15 +181,27 @@ public final class SelfTest {
             JsonObject search = step("search wd=" + keyword, () -> SpiderBridge.get().search(site.key, keyword, 1));
             if (search != null) line("     list=" + SpiderBridge.array(search, "list").size());
         }
-        line("activityResumed(end)=" + (App.activity() != null));
+        line("activityResumed(end)=" + (App.activity() != null) + " chain=" + (played ? "OK" : "incomplete"));
+        return played;
+    }
+
+    private static JsonObject firstVod(JsonArray list) {
+        for (JsonElement item : list) {
+            if (!item.isJsonObject()) continue;
+            String id = Json.safeString(item.getAsJsonObject(), "vod_id");
+            if (!id.isEmpty() && !id.startsWith("msearch:")) return item.getAsJsonObject();
+        }
+        return null;
     }
 
     private static String firstId(JsonArray list) {
-        return list.size() > 0 && list.get(0).isJsonObject() ? Json.safeString(list.get(0).getAsJsonObject(), "vod_id") : "";
+        JsonObject vod = firstVod(list);
+        return vod == null ? "" : Json.safeString(vod, "vod_id");
     }
 
     private static String firstName(JsonArray list) {
-        return list.size() > 0 && list.get(0).isJsonObject() ? Json.safeString(list.get(0).getAsJsonObject(), "vod_name") : "";
+        JsonObject vod = firstVod(list);
+        return vod == null ? "" : Json.safeString(vod, "vod_name");
     }
 
     private interface Call {
